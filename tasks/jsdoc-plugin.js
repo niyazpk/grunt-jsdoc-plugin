@@ -3,124 +3,121 @@
  * @copyright Bertrand Chevrier 2012
  * @author Bertrand Chevrier <chevrier.bertrand@gmail.com>
  * @license MIT
- * 
+ *
  * @module tasks/jsdoc-plugin
  */
 
+var path = require('path');
+var exec = require('./lib/exec');
+
 /**
  * Register the jsdoc task and helpers to Grunt
+ * @type GruntTask
  * @constructor
  * @param {Object} grunt - the grunt context
  */
 module.exports = function jsDocTask(grunt) {
-	'use strict';
+    'use strict';
 
-	var util = require('util'),
-	    errorCode = {
-			generic : 1,
-			task	: 3	
-		};
+    var errorCode = {
+        generic: 1,
+        task: 3
+    };
 
-	/**
-     * Register the jsdoc task to Grunt
-     * @memberOf module:tasks/jsdoc-plugin
-     */
-	function registerJsdocTask() {
-		
-		var exec		= require('child_process').exec,
-		    fs			= require('fs'),
-		    done		= grunt.task.current.async(),
-			srcs		= grunt.file.expandFiles(grunt.task.current.file.src),
-		    dest		= grunt.task.current.file.dest || 'doc',
-			javaHome	= process.env.JAVA_HOME,
-			timeout		= 60000,
-			jsDoc;
+    var jsdocFlags = ['access', 'configure', 'destination', 'debug', 'encoding', 'help', 'match', 'nocolor', 'private', 'package', 'pedantic', 'query', 'recurse', 'readme', 'template', 'test', 'tutorials', 'version', 'verbose', 'explain'];
 
 
-		/**
-		 * Build the jsdoc to execute.
-		 * @memberOf module:tasks/jsdoc-plugin.registerJsdocTask
-		 * @param {String} bin the path to the command
-		 * @param {Array} sources the list of sources files 
-		 * @param {String} destination the destination directory
-		 * @return {String} command the command ready to be executed
-		 */
-		var buildCmd = function(bin, sources, destination){
-			var cmd = bin + ' -d ' + destination +' ' + sources.join(' ');
-			grunt.log.debug(cmd);
-			return cmd;
-		};
+    //bind the task to the grunt context
+    grunt.registerMultiTask('jsdoc', 'Generates source documentation using jsdoc', function registerJsdocTask() {
 
-		/**
-		 * Lookup for the jsdoc executable throught the different configurations
-		 * @todo find a more elegant way to do that... 
-		 * @memberOf module:tasks/jsdoc-plugin.registerJsdocTask
-		 * @returns {String} the command path relative to the project root 
-		 */
-		var jsDocLookup = function(){
-			
-			var base = 'node_modules/jsdoc/jsdoc',
-				paths = [ base, 'node_modules/grunt-jsdoc-plugin/' + base ],
-				nodePath = process.env.NODE_PATH || '',
-				_ = grunt.utils._;
+        var jsdoc;
+        var params = {};
+        var done = this.async();
+        var options = this.options({
+            'private': true,
+            'ignoreWarnings': false,
+            'timeout': 60
+        });
 
-			_.map(nodePath.split(':'), function(p){
-				if(!/\/$/.test(p)){
-					p += '/';
-				}
-				paths.push(p + base);
-			});
-		
-			for(var i in paths){
-				grunt.log.debug('look up jsdoc at ' + paths[i]);
-				if(fs.existsSync(paths[i])){
-					return paths[i];
-				}
-			}
-		};
-		jsDoc = jsDocLookup();
-		
-		//check if java is set
-		if(!javaHome){
-			grunt.log.error("JAVA_HOME is no set, but java is required by jsdoc to run.");
-			grunt.fail.warn('Wrong installation/environnement', errorCode.generic);
-		} else {
-			grunt.log.debug("JAVA_HOME : " + javaHome);
-		}
 
-		//check if jsdoc npm module is installedz
-		if(jsDoc === undefined){
-			grunt.log.error('Unable to locate jsdoc');
-			grunt.fail.warn('Wrong installation/environnement', errorCode.generic);
-		}
+        var sources = this.filesSrc;
+        var jsdocPath = this.data.jsdoc;
 
-		//check if there is sources to generate the doc for
-		if(srcs.length === 0){
-			grunt.log.error('No source files defined');
-			grunt.fail.warn('Wrong configuration', errorCode.generic);
-		}
-		
-		fs.exists(dest, function(exists){
-			//if the destination don't exists, we create it
-			if(!exists){
-				grunt.file.mkdir(dest);
-			}
+        if (!options.destination) {
+            // Support for old syntax where destination was provided through 'dest' key
+            options.destination = this.files[0].dest || 'doc';
+        }
 
-			//execution of the jsdoc command
-			exec(buildCmd(jsDoc, srcs, dest), {timeout: timeout},  function (error, stdout, stderr) {
-				grunt.log.debug('stdout: ' + stdout);
-				grunt.log.debug('stderr: ' + stderr);
-				if (error) {
-					grunt.log.error('jsdoc error: ' + error);
-					grunt.fail.warn('jsdoc failure', errorCode.task);
-				}
-				grunt.log.write('Documentation generated to : '+ dest);	
-				
-				done(true);
-			});
-		});
-	}
+        //legacy configs
+        if (options.config) {
+            params.configure = options.config;
+        }
 
-	//bind the task to the grunt context
-	grunt.registerMultiTask('jsdoc', 'Generates source documentation using jsdoc', registerJsdocTask);
+        // Compute JSDoc flags from options
+        jsdocFlags.forEach(function(flag) {
+            if (typeof options[flag] !== 'undefined') {
+                params[flag] = options[flag];
+            }
+        });
+
+        if (jsdocPath && grunt.file.exists(jsdocPath) && grunt.file.isFile(jsdocPath)) {
+            //use the given jsdoc path if set
+            jsdoc = jsdocPath;
+        } else {
+            //lookup jsdoc
+            jsdoc = exec.lookup(grunt);
+        }
+
+        //check if jsdoc npm module is installed
+        if (jsdoc === undefined) {
+            grunt.log.error('Unable to locate jsdoc');
+            grunt.fail.warn('Wrong installation/environnement', errorCode.generic);
+        }
+
+        // convert jsdoc path to relative path
+        jsdoc = path.relative('.', jsdoc);
+
+        grunt.log.debug("Using jsdoc from : " + jsdoc);
+
+        //check if there is sources to generate the doc for
+        if (sources.length === 0 && !params.configure) {
+            grunt.log.error('No source files defined');
+            grunt.fail.warn('Wrong configuration', errorCode.generic);
+        }
+
+        //check if jsdoc config file path is provided and does exist
+        if (params.configure && !grunt.file.exists(params.configure)) {
+            grunt.log.error('jsdoc config file path does not exist');
+            grunt.fail.warn('Wrong configuration', errorCode.generic);
+        }
+
+        if (!grunt.file.exists(params.destination) && !params.configure) {
+            grunt.file.mkdir(options.destination);
+            grunt.log.debug('create destination : ' + options.destination);
+            if (!grunt.file.exists(params.destination)) {
+                grunt.log.error('unable to create documentation folder : ' + params.destination);
+                grunt.fail.warn('Wrong configuration', errorCode.generic);
+            }
+        }
+
+        //execution of the jsdoc command
+        var child = exec.buildSpawned(grunt, jsdoc, sources, params);
+
+        child.stdout.on('data', grunt.log.debug);
+        child.stderr.on('data', function(data) {
+            if (!options.ignoreWarnings) {
+                grunt.log.error(data);
+            }
+        });
+        child.on('exit', function(code) {
+            if (code === 0) {
+                grunt.log.write('Documentation generated to ' + path.resolve(options.destination));
+                done(true);
+            } else {
+                grunt.fail.warn('jsdoc terminated with a non-zero exit code', errorCode.task);
+                done();
+            }
+        });
+    });
 };
+
